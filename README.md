@@ -1,4 +1,4 @@
-# AI Invaders by 2 Acre Studios
+# AI Invaders
 
 ## Description
 AI Invaders is a modern take on the classic space shooter genre, incorporating artificial intelligence to provide dynamic feedback on player performance. Set in a vibrant universe, players battle against waves of uniquely shaped and colored invaders, striving to achieve high scores while the game adjusts difficulty in real-time based on their performance.
