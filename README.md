@@ -16,17 +16,9 @@ AI Invaders is a modern take on the classic space shooter genre, incorporating a
 - **Exit Game:** Press 'X'
 
 ## Requirements
-This game requires Python and Pygame. All dependencies can be installed via the requirements.txt included in this repository.
-
-## Installation
-1. Clone the repository: git clone https://github.com/YourUsername/AI-Invaders.git
-2. Install the requirements: pip install -r requirements.txt
-3. Run the game: python space.py
+This game requires Python, Pygame, and Ollama using a tiny LLM like gemma:2b-instruct.
 
 ## Contributing
 Feel free to fork the project, submit pull requests, or send us your feedback and suggestions!
 
-## Requirements
-pygame==2.5.2
-requests
 
