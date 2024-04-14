@@ -1,7 +1,7 @@
 # AI Invaders
 
 ## Description
-<img src="https://2acrestudios.com/wp-content/uploads/2024/04/ai-invaders.png" style="width: 300px;" align="right" />AI Invaders is a modern take on the classic space shooter genre, incorporating artificial intelligence to provide dynamic feedback on player performance. Set in a vibrant universe, players battle against waves of uniquely shaped and colored invaders, striving to achieve high scores while the game adjusts difficulty in real-time based on their performance.
+<img src="https://2acrestudios.com/wp-content/uploads/2024/04/ai-invaders.png" style="width: 300px;" align="right" />AI Invaders is a modern take on the classic space shooter genre, that pits you against artificial intelligence during gameplay while also providing dynamic feedback on player performance at the end of each game. Set in a vibrant universe, players battle against waves of uniquely shaped and colored invaders, striving to achieve high scores while the game adjusts difficulty in real-time based on their performance.
 
 ## Features
 - **Dynamic AI Feedback:** AI comments on your score and game performance at the end of each session.
