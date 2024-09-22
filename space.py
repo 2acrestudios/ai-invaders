@@ -6,6 +6,7 @@ import requests
 import threading
 import json
 import re
+from queue import Queue
 
 pygame.init()
 
@@ -18,7 +19,7 @@ BULLET_SPEED = 15
 ENEMY_BULLET_SPEED = 5
 START_ENEMY_SPEED = 2
 MOVE_DOWN_STEP = 10
-LEVEL_CHANGE_INCREASE = 0.5
+LEVEL_CHANGE_INCREASE = 0.2  # Reduced from 0.5 to 0.2
 GAME_OVER_Y = SCREEN_HEIGHT - 100
 SHOOTING_FREQUENCY = 120
 UFO_SIZE = 60
@@ -29,13 +30,17 @@ POWER_UP_SIZE = 30
 POWER_UP_DURATION = 300
 
 # Adjusted Meteor Constants
-METEOR_SIZE = 10  # Reduced size from 20 to 10
-METEOR_FALL_SPEED = 3  # Reduced speed from 5 to 3
-METEOR_SHOWER_DURATION = 200  # Reduced duration from 300 to 200 frames
-METEOR_CREATION_CHANCE = 1  # Reduced chance of creation during shower
-METEOR_SHOWER_PROBABILITY = 1  # Reduced chance of starting a shower
+METEOR_SIZE = 10
+METEOR_FALL_SPEED = 3
+METEOR_SHOWER_DURATION = 200
+METEOR_CREATION_CHANCE = 1
+METEOR_SHOWER_PROBABILITY = 1
 
-# Colors
+# Maximum Difficulty Settings
+MAX_DIFFICULTY = 2.0  # Capped maximum difficulty
+MAX_ENEMY_SPEED = START_ENEMY_SPEED * MAX_DIFFICULTY
+
+# Colors (same as before)
 COLOR_WHITE = (255, 255, 255)
 COLOR_GREEN = (0, 255, 0)
 COLOR_RED = (255, 0, 0)
@@ -47,6 +52,11 @@ COLOR_ORANGE = (255, 165, 0)
 COLOR_PINK = (255, 20, 147)
 COLOR_SILVER = (192, 192, 192)
 COLOR_BLACK = (0, 0, 0)
+COLOR_GOLD = (255, 215, 0)
+COLOR_LIME = (50, 205, 50)
+COLOR_MAGENTA = (255, 0, 255)
+COLOR_TEAL = (0, 128, 128)
+COLOR_OLIVE = (128, 128, 0)
 
 # Screen setup
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -55,41 +65,47 @@ pygame.display.set_caption('AI Invaders')
 # Font setup
 font = pygame.font.SysFont('consolas', 20)
 
-# Player setup
+# Global Variables Initialization
 player_pos = [SCREEN_WIDTH // 2, SCREEN_HEIGHT - 60]
 player_speed = 5
-player_powered_up = False
-power_up_timer = 0
+player_power_ups = {
+    'double_fire': False,
+    'rapid_fire': False,
+    'invincibility': False,
+    'shield': False,
+    'score_multiplier': False,
+}
+power_up_timers = {
+    'double_fire': 0,
+    'rapid_fire': 0,
+    'invincibility': 0,
+    'shield': 0,
+    'score_multiplier': 0,
+}
+player_lives = 3
 player_positions = []
-
-# Enemy setup variables
 direction = 1
 enemy_speed = START_ENEMY_SPEED
 level = 1
 score = 0
 difficulty = 1.0  # Dynamic difficulty adjustment
-
-# UFO setup
 ufo = None
 ufo_timer = 0
-
-# Bullet setups
 player_bullets = []
 enemy_bullets = []
 ufo_bullets = []
-
-# Explosion effects
 explosions = []
-
-# Power-up setup
 power_ups = []
-
-# Meteor shower
 meteors = []
 meteor_shower_active = False
 meteor_shower_timer = 0
 
-# Shape and Color details
+# Queues for caching AI messages and decisions
+assistant_messages = Queue(maxsize=5)
+taunt_messages = Queue(maxsize=5)
+ai_decisions = Queue(maxsize=10)
+
+# Shape and Color details (same as before)
 def get_level_details(level):
     shapes = {
         1: ("rectangle", COLOR_RED),
@@ -105,7 +121,7 @@ def get_level_details(level):
     }
     return shapes[(level - 1) % len(shapes) + 1]
 
-# Draw shapes based on type and color
+# Draw shapes based on type and color (same as before)
 def draw_shape(screen, shape_type, color, x, y, size=ENEMY_SIZE):
     if shape_type == "rectangle":
         pygame.draw.rect(screen, color, (x, y, size, size))
@@ -116,10 +132,13 @@ def draw_shape(screen, shape_type, color, x, y, size=ENEMY_SIZE):
         pygame.draw.polygon(screen, color, points)
 
 def draw_elements():
-    global level
+    global level, player_lives
     shape, invader_color = get_level_details(level)
     # Draw player
-    pygame.draw.rect(screen, COLOR_GREEN, (player_pos[0], player_pos[1], PLAYER_SIZE, PLAYER_SIZE))
+    if player_power_ups['invincibility']:
+        pygame.draw.rect(screen, COLOR_GOLD, (player_pos[0], player_pos[1], PLAYER_SIZE, PLAYER_SIZE))
+    else:
+        pygame.draw.rect(screen, COLOR_GREEN, (player_pos[0], player_pos[1], PLAYER_SIZE, PLAYER_SIZE))
     # Draw player bullets
     for bullet in player_bullets:
         pygame.draw.rect(screen, COLOR_WHITE, (bullet[0], bullet[1], BULLET_SIZE, BULLET_SIZE))
@@ -148,11 +167,28 @@ def draw_elements():
     # Draw power-ups
     for power_up in power_ups:
         x, y = power_up['pos']
-        pygame.draw.rect(screen, COLOR_BLUE, (x, y, POWER_UP_SIZE, POWER_UP_SIZE))
+        color = get_power_up_color(power_up['type'])
+        pygame.draw.rect(screen, color, (x, y, POWER_UP_SIZE, POWER_UP_SIZE))
     # Draw meteors
     for meteor in meteors:
         x, y = meteor['pos']
         pygame.draw.circle(screen, COLOR_ORANGE, (x, y), METEOR_SIZE)
+    # Draw lives
+    lives_text = font.render(f'Lives: {player_lives}', True, COLOR_WHITE)
+    screen.blit(lives_text, (10, 50))
+
+def get_power_up_color(power_up_type):
+    colors = {
+        'screen_clear': COLOR_LIME,
+        'double_fire': COLOR_MAGENTA,
+        'rapid_fire': COLOR_CYAN,
+        'invincibility': COLOR_GOLD,
+        'shield': COLOR_BLUE,
+        'extra_life': COLOR_PINK,
+        'slow_motion': COLOR_TEAL,
+        'score_multiplier': COLOR_YELLOW,
+    }
+    return colors.get(power_up_type, COLOR_WHITE)
 
 def draw_invaders_row(y_position):
     num_invaders = 10
@@ -228,12 +264,14 @@ def show_game_over():
 
 def restart_game():
     global score, level, invaders, player_bullets, enemy_bullets, ufo_bullets, direction
-    global ufo, ufo_timer, player_powered_up, power_up_timer, meteors, meteor_shower_active, meteor_shower_timer
-    global difficulty
+    global ufo, ufo_timer, player_power_ups, power_up_timers, meteors, meteor_shower_active, meteor_shower_timer
+    global difficulty, player_lives, player_speed
     score = 0
     level = 1
     difficulty = 1.0
-    invaders = initialize_invaders()
+    enemy_speed = START_ENEMY_SPEED
+    invaders.clear()
+    invaders.extend(initialize_invaders())
     player_bullets.clear()
     enemy_bullets.clear()
     ufo_bullets.clear()
@@ -241,20 +279,27 @@ def restart_game():
     direction = 1
     ufo = None
     ufo_timer = 0
-    player_powered_up = False
-    power_up_timer = 0
+    player_power_ups = {key: False for key in player_power_ups}
+    power_up_timers = {key: 0 for key in power_up_timers}
     meteors.clear()
     meteor_shower_active = False
     meteor_shower_timer = 0
+    player_lives = 3
+    player_speed = 5
     game_loop()
 
 def ai_controlled_shoot():
-    global invaders, enemy_bullets
-    decision = fetch_ai_decision()
-    if decision is not None and invaders:
-        shooter_idx = int(decision) % len(invaders)
-        shooter = invaders[shooter_idx]['pos']
-        enemy_bullets.append([shooter[0] + ENEMY_SIZE // 2, shooter[1] + ENEMY_SIZE])
+    if not ai_decisions.empty() and invaders:
+        decision = ai_decisions.get()
+        if decision is not None:
+            shooter_idx = int(decision) % len(invaders)
+            shooter = invaders[shooter_idx]['pos']
+            enemy_bullets.append([shooter[0] + ENEMY_SIZE // 2, shooter[1] + ENEMY_SIZE])
+    else:
+        # Default behavior if no AI decision available
+        if invaders:
+            shooter = random.choice(invaders)['pos']
+            enemy_bullets.append([shooter[0] + ENEMY_SIZE // 2, shooter[1] + ENEMY_SIZE])
 
 def fetch_ai_decision():
     prompt = "Based on the player's position and behavior, decide which invader should fire next. Return the index of the invader (0 to {}).".format(len(invaders) - 1)
@@ -319,15 +364,8 @@ def generate_ai_formation():
 def adjust_difficulty():
     global difficulty, enemy_speed
     # Increase difficulty based on score
-    difficulty = 1 + (score / 500)
-    enemy_speed = START_ENEMY_SPEED * difficulty
-
-def ai_controlled_power_ups():
-    global power_ups
-    if random.randint(0, 1000) < 5:
-        x = random.randint(0, SCREEN_WIDTH - POWER_UP_SIZE)
-        y = -POWER_UP_SIZE
-        power_ups.append({'pos': [x, y], 'type': 'speed'})
+    difficulty = min(1 + (score / 2000), MAX_DIFFICULTY)  # Adjusted divisor from 500 to 2000
+    enemy_speed = min(START_ENEMY_SPEED * difficulty, MAX_ENEMY_SPEED)  # Apply maximum speed cap
 
 def ai_assistant_message():
     prompt = "Provide a hint or commentary to help the player improve."
@@ -343,11 +381,12 @@ def ai_special_event():
     global meteor_shower_active, meteor_shower_timer
     if not meteor_shower_active and random.randint(0, 1000) < METEOR_SHOWER_PROBABILITY:
         meteor_shower_active = True
-        meteor_shower_timer = METEOR_SHOWER_DURATION  # Reduced duration
+        meteor_shower_timer = METEOR_SHOWER_DURATION
 
 def game_loop():
     global direction, enemy_speed, level, score, invaders, ufo, ufo_timer
-    global player_powered_up, power_up_timer, meteors, meteor_shower_active, meteor_shower_timer
+    global player_power_ups, power_up_timers, meteors, meteor_shower_active, meteor_shower_timer, player_lives
+    global player_speed
     running = True
     clock = pygame.time.Clock()
     frame_count = 0
@@ -365,12 +404,12 @@ def game_loop():
 
         if assistant_message_timer > 0:
             assistant_text = font.render(assistant_message, True, COLOR_CYAN)
-            screen.blit(assistant_text, (10, 50))
+            screen.blit(assistant_text, (10, 70))
             assistant_message_timer -= 1
 
         if taunt_message_timer > 0:
             taunt_text = font.render(taunt_message, True, COLOR_RED)
-            screen.blit(taunt_text, (10, 70))
+            screen.blit(taunt_text, (10, 90))
             taunt_message_timer -= 1
 
         for event in pygame.event.get():
@@ -387,8 +426,15 @@ def game_loop():
             player_pos[0] -= player_speed
         if keys[pygame.K_RIGHT] and player_pos[0] < SCREEN_WIDTH - PLAYER_SIZE:
             player_pos[0] += player_speed
-        if keys[pygame.K_SPACE] and len(player_bullets) < 3 and frame_count % 10 == 0:
-            player_bullets.append([player_pos[0] + PLAYER_SIZE // 2, player_pos[1]])
+
+        # Shooting logic with power-ups
+        shoot_cooldown = 10 if not player_power_ups['rapid_fire'] else 5
+        if keys[pygame.K_SPACE] and frame_count % shoot_cooldown == 0:
+            if player_power_ups['double_fire']:
+                player_bullets.append([player_pos[0] + PLAYER_SIZE // 4, player_pos[1]])
+                player_bullets.append([player_pos[0] + 3 * PLAYER_SIZE // 4, player_pos[1]])
+            else:
+                player_bullets.append([player_pos[0] + PLAYER_SIZE // 2, player_pos[1]])
 
         player_positions.append(player_pos[0])
         if len(player_positions) > 100:
@@ -402,16 +448,24 @@ def game_loop():
         update_ufo()
         update_power_ups()
         update_meteors()
-        ai_controlled_power_ups()
         ai_special_event()
         adjust_difficulty()
+        update_power_up_timers()
 
+        # Get cached assistant message
         if frame_count % 600 == 0:
-            assistant_message = ai_assistant_message()
+            try:
+                assistant_message = assistant_messages.get_nowait()
+            except:
+                assistant_message = ""
             assistant_message_timer = 300
 
+        # Get cached taunt message
         if frame_count % 800 == 0:
-            taunt_message = ai_invader_taunt()
+            try:
+                taunt_message = taunt_messages.get_nowait()
+            except:
+                taunt_message = ""
             taunt_message_timer = 300
 
         draw_elements()
@@ -419,8 +473,25 @@ def game_loop():
         clock.tick(60)
         frame_count += 1
 
+def update_power_up_timers():
+    global player_power_ups, power_up_timers, enemy_speed
+    for power_up, active in player_power_ups.items():
+        if active:
+            power_up_timers[power_up] -= 1
+            if power_up_timers[power_up] <= 0:
+                player_power_ups[power_up] = False
+                # Reset any modified attributes
+                if power_up == 'rapid_fire':
+                    pass  # Reset handled in shooting logic
+                elif power_up == 'invincibility':
+                    pass  # Visual indication handled in drawing logic
+                elif power_up == 'slow_motion':
+                    enemy_speed /= 0.5
+                elif power_up == 'score_multiplier':
+                    pass
+
 def update_bullets():
-    global player_bullets, enemy_bullets, ufo_bullets, score, ufo, power_up_timer, player_powered_up
+    global player_bullets, enemy_bullets, ufo_bullets, score, ufo, power_ups, player_power_ups, player_lives
     # Player bullets
     for bullet in player_bullets[:]:
         bullet[1] -= BULLET_SPEED
@@ -433,7 +504,11 @@ def update_bullets():
                 if x <= bullet[0] <= x + ENEMY_SIZE and y <= bullet[1] <= y + ENEMY_SIZE:
                     player_bullets.remove(bullet)
                     invader['explosion_timer'] = EXPLOSION_DURATION
-                    score += 10
+                    points = 10 if not player_power_ups['score_multiplier'] else 20
+                    score += points
+                    # Random chance to drop a power-up
+                    if random.randint(0, 100) < 20:
+                        drop_power_up(x, y)
                     break
             # Check collision with UFO
             if ufo:
@@ -442,7 +517,8 @@ def update_bullets():
                     player_bullets.remove(bullet)
                     explosions.append([x + UFO_SIZE // 2, y + UFO_SIZE // 2, EXPLOSION_DURATION])
                     ufo = None
-                    score += 50
+                    points = 50 if not player_power_ups['score_multiplier'] else 100
+                    score += points
 
     # Enemy bullets
     for bullet in enemy_bullets[:]:
@@ -450,7 +526,16 @@ def update_bullets():
         if bullet[1] > SCREEN_HEIGHT:
             enemy_bullets.remove(bullet)
         elif player_pos[0] <= bullet[0] <= player_pos[0] + PLAYER_SIZE and player_pos[1] <= bullet[1] <= player_pos[1] + PLAYER_SIZE:
-            show_game_over()
+            if player_power_ups['invincibility']:
+                enemy_bullets.remove(bullet)
+            elif player_power_ups['shield']:
+                enemy_bullets.remove(bullet)
+                player_power_ups['shield'] = False
+            else:
+                enemy_bullets.remove(bullet)
+                player_lives -= 1
+                if player_lives <= 0:
+                    show_game_over()
 
     # UFO bullets
     for bullet in ufo_bullets[:]:
@@ -458,7 +543,16 @@ def update_bullets():
         if bullet[1] > SCREEN_HEIGHT:
             ufo_bullets.remove(bullet)
         elif player_pos[0] <= bullet[0] <= player_pos[0] + PLAYER_SIZE and player_pos[1] <= bullet[1] <= player_pos[1] + PLAYER_SIZE:
-            show_game_over()
+            if player_power_ups['invincibility']:
+                ufo_bullets.remove(bullet)
+            elif player_power_ups['shield']:
+                ufo_bullets.remove(bullet)
+                player_power_ups['shield'] = False
+            else:
+                ufo_bullets.remove(bullet)
+                player_lives -= 1
+                if player_lives <= 0:
+                    show_game_over()
 
     # Update explosions
     for explosion in explosions[:]:
@@ -466,12 +560,11 @@ def update_bullets():
         if explosion[2] <= 0:
             explosions.remove(explosion)
 
-    # Power-up timer
-    if player_powered_up:
-        power_up_timer -= 1
-        if power_up_timer <= 0:
-            player_powered_up = False
-            player_speed = 5
+def drop_power_up(x, y):
+    global power_ups
+    power_up_types = ['screen_clear', 'double_fire', 'rapid_fire', 'invincibility', 'shield', 'extra_life', 'slow_motion', 'score_multiplier']
+    power_up_type = random.choice(power_up_types)
+    power_ups.append({'pos': [x, y], 'type': power_up_type})
 
 def update_invaders():
     global invaders, direction, level, enemy_speed, score, difficulty
@@ -496,7 +589,7 @@ def update_invaders():
 
     if not invaders:
         level += 1
-        enemy_speed += LEVEL_CHANGE_INCREASE
+        enemy_speed += LEVEL_CHANGE_INCREASE  # Less aggressive increase
         score += 100
         invaders = initialize_invaders()
 
@@ -517,7 +610,7 @@ def update_ufo():
                 ufo_bullets.append([ufo['pos'][0] + UFO_SIZE // 2, ufo['pos'][1] + UFO_SIZE])
 
 def update_power_ups():
-    global power_ups, player_powered_up, power_up_timer, player_speed
+    global score, player_power_ups, power_up_timers, player_speed, enemy_speed, player_lives
     for power_up in power_ups[:]:
         power_up['pos'][1] += 2
         x, y = power_up['pos']
@@ -525,12 +618,36 @@ def update_power_ups():
             power_ups.remove(power_up)
         elif player_pos[0] <= x <= player_pos[0] + PLAYER_SIZE and player_pos[1] <= y <= player_pos[1] + PLAYER_SIZE:
             power_ups.remove(power_up)
-            player_powered_up = True
-            power_up_timer = POWER_UP_DURATION
-            player_speed = 8  # Increased speed
+            power_type = power_up['type']
+            if power_type == 'screen_clear':
+                # Destroy all invaders
+                for invader in invaders:
+                    invader['explosion_timer'] = EXPLOSION_DURATION
+                score += 100
+            elif power_type == 'double_fire':
+                player_power_ups['double_fire'] = True
+                power_up_timers['double_fire'] = POWER_UP_DURATION
+            elif power_type == 'rapid_fire':
+                player_power_ups['rapid_fire'] = True
+                power_up_timers['rapid_fire'] = POWER_UP_DURATION
+            elif power_type == 'invincibility':
+                player_power_ups['invincibility'] = True
+                power_up_timers['invincibility'] = POWER_UP_DURATION
+            elif power_type == 'shield':
+                player_power_ups['shield'] = True
+                power_up_timers['shield'] = POWER_UP_DURATION
+            elif power_type == 'extra_life':
+                player_lives += 1
+            elif power_type == 'slow_motion':
+                player_power_ups['slow_motion'] = True
+                power_up_timers['slow_motion'] = POWER_UP_DURATION
+                enemy_speed *= 0.5
+            elif power_type == 'score_multiplier':
+                player_power_ups['score_multiplier'] = True
+                power_up_timers['score_multiplier'] = POWER_UP_DURATION
 
 def update_meteors():
-    global meteors, meteor_shower_active, meteor_shower_timer
+    global meteors, meteor_shower_active, meteor_shower_timer, player_lives
     if meteor_shower_active:
         meteor_shower_timer -= 1
         if meteor_shower_timer <= 0:
@@ -545,8 +662,16 @@ def update_meteors():
         if y > SCREEN_HEIGHT:
             meteors.remove(meteor)
         elif player_pos[0] <= x <= player_pos[0] + PLAYER_SIZE and player_pos[1] <= y <= player_pos[1] + PLAYER_SIZE:
-            meteors.remove(meteor)
-            show_game_over()
+            if player_power_ups['invincibility']:
+                meteors.remove(meteor)
+            elif player_power_ups['shield']:
+                meteors.remove(meteor)
+                player_power_ups['shield'] = False
+            else:
+                meteors.remove(meteor)
+                player_lives -= 1
+                if player_lives <= 0:
+                    show_game_over()
 
 def initialize_invaders():
     invaders = []
@@ -555,8 +680,41 @@ def initialize_invaders():
         invaders.append({'pos': pos, 'explosion_timer': 0})
     return invaders
 
+# Background threads for fetching AI messages and decisions (same as before)
+def background_fetch_assistant_messages():
+    while True:
+        try:
+            message = ai_assistant_message()
+            assistant_messages.put(message, timeout=5)
+        except Exception as e:
+            print(f"Error in background_fetch_assistant_messages: {e}")
+            continue
+
+def background_fetch_taunt_messages():
+    while True:
+        try:
+            message = ai_invader_taunt()
+            taunt_messages.put(message, timeout=5)
+        except Exception as e:
+            print(f"Error in background_fetch_taunt_messages: {e}")
+            continue
+
+def background_fetch_ai_decisions():
+    while True:
+        if len(invaders) > 0:
+            decision = fetch_ai_decision()
+            try:
+                ai_decisions.put(decision, timeout=5)
+            except:
+                pass
+
 # Initialize invaders after defining all functions
 invaders = initialize_invaders()
+
+# Start background threads for AI messages and decisions
+threading.Thread(target=background_fetch_assistant_messages, daemon=True).start()
+threading.Thread(target=background_fetch_taunt_messages, daemon=True).start()
+threading.Thread(target=background_fetch_ai_decisions, daemon=True).start()
 
 # Start game loop
 game_loop()
